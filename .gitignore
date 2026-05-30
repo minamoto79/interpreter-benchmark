@@ -1,0 +1,25 @@
+# Maven
+target/
+
+# Benchmark artifacts (regenerated each run)
+results.json
+jmh-result.json
+compilation.log
+corpus-meta.json
+*.jit
+
+# maven-shade generated
+dependency-reduced-pom.xml
+
+# Instruments / profiling traces
+*.trace/
+
+# direnv local cache
+.direnv/
+
+# IntelliJ
+.idea/
+*.iml
+
+# macOS
+.DS_Store

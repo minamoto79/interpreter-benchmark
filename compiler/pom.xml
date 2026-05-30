@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.jetbrains.hexana</groupId>
+        <artifactId>interpreter-jit-experiment</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>hexana-compiler</artifactId>
+    <packaging>jar</packaging>
+    <name>Interpreter JIT Experiment :: compiler (hexana JVMCI)</name>
+    <description>
+        v1 scaffold of the custom JVMCI compiler `hexana`: registers a JVMCICompilerFactory,
+        is selected via -Djvmci.Compiler=hexana, and SAFELY bails every method (installs no
+        code) so the VM stays stable. Foundation for later targeting a specific hot method.
+        Builds against the JBR's jdk.internal.vm.ci module (qualified-exported to Graal only),
+        so it needs the --add-exports below at compile time and at run time.
+    </description>
+
+    <properties>
+        <!-- Blank the inherited release property so the compiler plugin uses source/target
+             instead of the release flag. The release flag compiles against ct.sym, which
+             omits internal modules like jdk.internal.vm.ci; source/target uses the JBR's real
+             system image so this jar can compile against jdk.vm.ci.*. -->
+        <maven.compiler.release></maven.compiler.release>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+    </properties>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <!-- The jdk.vm.ci.* packages this compiler implements are exported only to
+                         Graal in a stock JDK; force-export them to this module so javac can see
+                         them. The same set must be passed at run time (see run-hexana.sh). The
+                         scaffold's bail path needs only these four; installing real code later
+                         additionally needs jdk.vm.ci.code.site / .hotspot.aarch64 / .aarch64. -->
+                    <compilerArgs>
+                        <!-- Make the internal JVMCI module observable/resolved so this jar can
+                             compile against the jdk.vm.ci.* types. -->
+                        <arg>--add-modules</arg>
+                        <arg>jdk.internal.vm.ci</arg>
+                        <arg>--add-exports</arg>
+                        <arg>jdk.internal.vm.ci/jdk.vm.ci.runtime=ALL-UNNAMED</arg>
+                        <arg>--add-exports</arg>
+                        <arg>jdk.internal.vm.ci/jdk.vm.ci.services=ALL-UNNAMED</arg>
+                        <arg>--add-exports</arg>
+                        <arg>jdk.internal.vm.ci/jdk.vm.ci.code=ALL-UNNAMED</arg>
+                        <arg>--add-exports</arg>
+                        <arg>jdk.internal.vm.ci/jdk.vm.ci.hotspot=ALL-UNNAMED</arg>
+                        <arg>--add-exports</arg>
+                        <arg>jdk.internal.vm.ci/jdk.vm.ci.meta=ALL-UNNAMED</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
