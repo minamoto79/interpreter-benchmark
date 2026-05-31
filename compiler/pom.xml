@@ -14,11 +14,12 @@
     <packaging>jar</packaging>
     <name>Interpreter JIT Experiment :: compiler (hexana JVMCI)</name>
     <description>
-        v1 scaffold of the custom JVMCI compiler `hexana`: registers a JVMCICompilerFactory,
-        is selected via -Djvmci.Compiler=hexana, and SAFELY bails every method (installs no
-        code) so the VM stays stable. Foundation for later targeting a specific hot method.
-        Builds against the JBR's jdk.internal.vm.ci module (qualified-exported to Graal only),
-        so it needs the --add-exports below at compile time and at run time.
+        The custom JVMCI compiler `hexana`: registers a JVMCICompilerFactory, is selected via
+        -Djvmci.Compiler=hexana, and installs real AArch64 machine code for ONE method —
+        Interpreter.run — by partial-evaluating it against the fixed program read from a
+        compilation-final oracle (the first Futamura projection). Every other method is safely
+        bailed (kept in the interpreter / C1). Builds against the JBR's jdk.internal.vm.ci module
+        (qualified-exported to Graal only), so it needs the --add-exports below at compile and run.
     </description>
 
     <properties>
@@ -57,6 +58,11 @@
                         <arg>jdk.internal.vm.ci/jdk.vm.ci.hotspot=ALL-UNNAMED</arg>
                         <arg>--add-exports</arg>
                         <arg>jdk.internal.vm.ci/jdk.vm.ci.meta=ALL-UNNAMED</arg>
+                        <!-- Real code installation additionally needs these: -->
+                        <arg>--add-exports</arg>
+                        <arg>jdk.internal.vm.ci/jdk.vm.ci.code.site=ALL-UNNAMED</arg>
+                        <arg>--add-exports</arg>
+                        <arg>jdk.internal.vm.ci/jdk.vm.ci.aarch64=ALL-UNNAMED</arg>
                     </compilerArgs>
                 </configuration>
             </plugin>

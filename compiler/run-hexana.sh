@@ -30,6 +30,8 @@ ACCESS=(
     --add-exports jdk.internal.vm.ci/jdk.vm.ci.code=ALL-UNNAMED
     --add-exports jdk.internal.vm.ci/jdk.vm.ci.hotspot=ALL-UNNAMED
     --add-exports jdk.internal.vm.ci/jdk.vm.ci.meta=ALL-UNNAMED
+    --add-exports jdk.internal.vm.ci/jdk.vm.ci.code.site=ALL-UNNAMED
+    --add-exports jdk.internal.vm.ci/jdk.vm.ci.aarch64=ALL-UNNAMED
 )
 
 # JVMCI selection: EnableJVMCI on, UseJVMCICompiler makes JVMCI the top tier, jvmci.Compiler
@@ -60,8 +62,19 @@ case "$mode" in
             "${ACCESS[@]}" "${JVMCI[@]}" \
             org.jetbrains.hexana.interp.ResultsWriter "${@:2}"
         ;;
+    verify)
+        # Correctness + smoke for the specialized Interpreter.run. -Xbatch makes the top-tier
+        # compile synchronous/deterministic so the [hexana] INSTALLED line appears before the
+        # correctness check. Add -XX:+PrintAssembly (needs hsdis) to see the emitted code.
+        BENCH_JAR="$ROOT/bench/target/benchmarks.jar"
+        exec "$JAVA_HOME/bin/java" \
+            -cp "$BENCH_JAR:$COMPILER_JAR" \
+            "${ACCESS[@]}" "${JVMCI[@]}" \
+            -Xbatch \
+            org.jetbrains.hexana.interp.SpecVerify "${@:2}"
+        ;;
     *)
-        echo "usage: $0 [smoke|bench]" >&2
+        echo "usage: $0 [smoke|bench|verify]" >&2
         exit 2
         ;;
 esac

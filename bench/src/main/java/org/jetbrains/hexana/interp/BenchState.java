@@ -34,5 +34,8 @@ public class BenchState {
         corpus = InputCorpus.generate(CORPUS_SIZE, SEED, ARITY);
         interpreter = new Interpreter(STACK_MAX);
         idx = 0;
+        // Publish the fixed program so the hexana JVMCI compiler can specialize Interpreter.run
+        // against it (no-op for normal C2 runs).
+        ProgramOracle.publish(program, constants);
     }
 }

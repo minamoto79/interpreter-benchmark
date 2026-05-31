@@ -56,6 +56,9 @@ class CorrectnessTest {
             final long expected = ProgramBuilder.reference(p.consts(), in, p.rounds(), p.arity());
             assertEquals(expected, got, "interpreter != reference @" + i);
             assertEquals(got, interp.run(p.code(), p.consts(), in), "non-deterministic @" + i);
+            // The specialization ceiling must compute the same result as the interpreter, or
+            // it isn't a faithful partial-evaluation of this program.
+            assertEquals(expected, Specialized.eval(in), "Specialized != reference @" + i);
         }
     }
 }

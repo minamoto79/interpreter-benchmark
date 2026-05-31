@@ -22,6 +22,8 @@
         <module>bench</module>
         <!-- v1: the custom JVMCI compiler `hexana` (scaffold: registers + safely bails). -->
         <module>compiler</module>
+        <!-- v1: the bytecode-specializing -javaagent that delivers the win via C2. -->
+        <module>specializer</module>
     </modules>
 
     <properties>

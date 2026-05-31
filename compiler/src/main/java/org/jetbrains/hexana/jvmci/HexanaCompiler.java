@@ -1,49 +1,124 @@
 package org.jetbrains.hexana.jvmci;
 
+import jdk.vm.ci.code.CodeCacheProvider;
 import jdk.vm.ci.code.CompilationRequest;
 import jdk.vm.ci.code.CompilationRequestResult;
+import jdk.vm.ci.code.InstalledCode;
+import jdk.vm.ci.hotspot.HotSpotCodeCacheProvider;
+import jdk.vm.ci.hotspot.HotSpotCompilationRequest;
 import jdk.vm.ci.hotspot.HotSpotCompilationRequestResult;
+import jdk.vm.ci.hotspot.HotSpotCompiledCode;
+import jdk.vm.ci.hotspot.HotSpotJVMCIRuntime;
+import jdk.vm.ci.hotspot.HotSpotResolvedJavaMethod;
+import jdk.vm.ci.meta.ConstantReflectionProvider;
+import jdk.vm.ci.meta.JavaConstant;
+import jdk.vm.ci.meta.MetaAccessProvider;
+import jdk.vm.ci.meta.ResolvedJavaField;
 import jdk.vm.ci.meta.ResolvedJavaMethod;
+import jdk.vm.ci.meta.ResolvedJavaType;
+import jdk.vm.ci.runtime.JVMCI;
+import jdk.vm.ci.runtime.JVMCIBackend;
 import jdk.vm.ci.runtime.JVMCICompiler;
 
+import org.jetbrains.hexana.jvmci.asm.AArch64Asm;
+import org.jetbrains.hexana.jvmci.asm.HexanaVMConfig;
+
 /**
- * v1 scaffold: a JVMCI compiler that installs NO code and safely bails on every method.
+ * The {@code hexana} JVMCI compiler. It installs <em>real machine code</em> for one method —
+ * {@code org.jetbrains.hexana.interp.Interpreter.run(int[], long[], long[])} — by
+ * partial-evaluating it against the fixed program (see {@link Specializer}); every other method is
+ * safely bailed (kept in the interpreter / C1).
  *
- * <p>Returning {@link HotSpotCompilationRequestResult#failure(String, boolean)} (rather than
- * installing an nmethod) is the documented safe path: HotSpot records the top-tier (tier-4)
- * compile as failed for that method and keeps it in the interpreter / C1, and the VM stays
- * stable. {@code retryable = false} prevents the method from being re-queued endlessly.
- *
- * <p>Caveat baked into this build: with {@code -XX:+UseJVMCICompiler} and no Graal, JVMCI is the
- * ONLY top tier, so bailing every method caps everything at C1 (no C2). That's fine for proving
- * the plumbing and as a foundation; it is NOT a representative benchmark configuration.
- *
- * <p>Next step (not done here): match a target method in {@link #compileMethod} and actually
- * install code via {@code HotSpotCodeCacheProvider.installCode(...)} — which additionally
- * requires the {@code jdk.vm.ci.code.site}, {@code jdk.vm.ci.hotspot.aarch64} and
- * {@code jdk.vm.ci.aarch64} exports plus correct frame size, deopt/scope info, oop maps,
- * exception tables, safepoint poll, stack bang, and the JDK17+ nmethod entry barrier.
+ * <p>The fixed program is read at compile time from a compilation-final oracle
+ * ({@code org.jetbrains.hexana.interp.ProgramOracle.code/consts}) via JVMCI constant reflection —
+ * the raw-JVMCI analogue of how Truffle reads {@code @CompilationFinal} AST state. The installed
+ * code begins with an identity guard on {@code code}/{@code consts}; if a caller ever passes a
+ * different program, the guard traps and HotSpot deoptimizes back into the interpreter, so the
+ * installation is correct for all callers, not just the benchmark.
  */
 public final class HexanaCompiler implements JVMCICompiler {
 
-    /**
-     * If set (e.g. {@code -Dhexana.target=org.jetbrains.hexana.bench.SpanProcessor.process}),
-     * only requests whose method matches are logged distinctly — a hook for the eventual
-     * "compile only this method" step. The scaffold still bails everything.
-     */
-    private static final String TARGET = System.getProperty("hexana.target", "");
+    private static final String TARGET_HOLDER = "org.jetbrains.hexana.interp.Interpreter";
+    private static final String TARGET_NAME = "run";
+    private static final String TARGET_DESC = "([I[J[J)J";
+    private static final String ORACLE_CLASS = "org.jetbrains.hexana.interp.ProgramOracle";
+
+    private volatile boolean providersReady;
+    private MetaAccessProvider metaAccess;
+    private CodeCacheProvider codeCache;
+    private ConstantReflectionProvider constantReflection;
+    private HexanaVMConfig config;
+
+    private synchronized void ensureProviders() {
+        if (providersReady) {
+            return;
+        }
+        JVMCIBackend backend = JVMCI.getRuntime().getHostJVMCIBackend();
+        metaAccess = backend.getMetaAccess();
+        codeCache = backend.getCodeCache();
+        constantReflection = backend.getConstantReflection();
+        config = new HexanaVMConfig(HotSpotJVMCIRuntime.runtime().getConfigStore(), codeCache.getTarget().arch);
+        providersReady = true;
+    }
 
     @Override
     public CompilationRequestResult compileMethod(CompilationRequest request) {
         final ResolvedJavaMethod method = request.getMethod();
-        final String name = method.format("%H.%n%p");
-        final boolean isTarget = !TARGET.isEmpty() && name.contains(TARGET);
+        if (isTarget(method) && request.getEntryBCI() == JVMCICompiler.INVOCATION_ENTRY_BCI) {
+            try {
+                return installSpecialized(request, method);
+            } catch (Throwable t) {
+                // Any failure -> bail safely; the method stays in the interpreter / C1.
+                System.err.println("[hexana] specialization failed for " + method.format("%H.%n%p")
+                        + " -> bailing: " + t);
+                return HotSpotCompilationRequestResult.failure("hexana: " + t, false);
+            }
+        }
+        return HotSpotCompilationRequestResult.failure("hexana: not a target", false);
+    }
 
-        // Logging proves HotSpot is actually routing top-tier compiles to us.
-        System.err.println("[hexana] compileMethod bail"
-                + (isTarget ? " [TARGET]" : "")
-                + ": " + name + " (entryBCI=" + request.getEntryBCI() + ")");
+    private boolean isTarget(ResolvedJavaMethod m) {
+        return TARGET_NAME.equals(m.getName())
+                && TARGET_HOLDER.equals(m.getDeclaringClass().toJavaName())
+                && TARGET_DESC.equals(m.getSignature().toMethodDescriptor());
+    }
 
-        return HotSpotCompilationRequestResult.failure("hexana scaffold: not compiling", false);
+    private CompilationRequestResult installSpecialized(CompilationRequest request, ResolvedJavaMethod method)
+            throws ClassNotFoundException {
+        ensureProviders();
+
+        // Read the fixed program from the compilation-final oracle.
+        ResolvedJavaType oracle = metaAccess.lookupJavaType(Class.forName(ORACLE_CLASS));
+        ResolvedJavaField fCode = null;
+        ResolvedJavaField fConsts = null;
+        for (ResolvedJavaField f : oracle.getStaticFields()) {
+            if ("code".equals(f.getName())) {
+                fCode = f;
+            } else if ("consts".equals(f.getName())) {
+                fConsts = f;
+            }
+        }
+        if (fCode == null || fConsts == null) {
+            return HotSpotCompilationRequestResult.failure("hexana: oracle fields missing", false);
+        }
+        JavaConstant codeArray = constantReflection.readFieldValue(fCode, null);
+        JavaConstant constsArray = constantReflection.readFieldValue(fConsts, null);
+        if (codeArray == null || codeArray.isNull() || constsArray == null || constsArray.isNull()) {
+            // Program not published yet (compile raced ahead of @Setup); bail, retry later.
+            return HotSpotCompilationRequestResult.failure("hexana: program oracle not populated", true);
+        }
+
+        AArch64Asm asm = new AArch64Asm(codeCache, config);
+        asm.emitPrologue();
+        asm.emitNmethodEntryBarrier(); // required for a default JVMCI install on JDK17+
+        Specializer.emit(asm, metaAccess, constantReflection, method, codeArray, constsArray);
+        asm.emitEpilogue();
+
+        int id = (request instanceof HotSpotCompilationRequest hr) ? hr.getId() : 0;
+        HotSpotCompiledCode code = asm.finish((HotSpotResolvedJavaMethod) method, id, request.getEntryBCI());
+        InstalledCode installed = ((HotSpotCodeCacheProvider) codeCache).installCode(method, code, null, null, true);
+        System.err.println("[hexana] INSTALLED specialized Interpreter.run @ 0x"
+                + Long.toHexString(installed.getStart()));
+        return HotSpotCompilationRequestResult.success(0);
     }
 }
