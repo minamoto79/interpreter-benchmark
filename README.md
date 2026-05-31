@@ -28,11 +28,11 @@ that.
 
 ## Runtime — JBR with JVMCI
 
-Targets the source-built JetBrains Runtime at `/Users/minamoto/ws/github/jbr`, configured:
+Targets the source-built JetBrains Runtime at `$HOME/ws/github/jbr`, configured:
 
 ```sh
 ./configure \
-    --with-boot-jdk=/Users/minamoto/Library/Java/JavaVirtualMachines/jbr-21.0.8/Contents/Home \
+    --with-boot-jdk=$HOME/Library/Java/JavaVirtualMachines/jbr-21.0.8/Contents/Home \
     --with-jvm-variants=server \
     --with-debug-level=release \
     --with-jvm-features=jvmci \
@@ -44,7 +44,7 @@ gmake images
 compiler slot is empty — that's what `compiler/` fills). `$JAVA_HOME` is the resulting image:
 
 ```
-/Users/minamoto/ws/github/jbr/build/macosx-aarch64-server-release/images/jdk
+$HOME/ws/github/jbr/build/macosx-aarch64-server-release/images/jdk
 ```
 
 If you only ran the exploded build (no `gmake images`), use
@@ -58,7 +58,7 @@ $JAVA_HOME/bin/java -XX:+UnlockExperimentalVMOptions -XX:+EnableJVMCI -version
 ## Build & run
 
 ```sh
-export JAVA_HOME=…/jbr/build/macosx-aarch64-server-release/jdk
+export JAVA_HOME=$HOME/ws/github/jbr/build/macosx-aarch64-server-release/jdk
 mvn package                              # builds bench/target/benchmarks.jar, runs CorrectnessTest
 mvn test                                 # CorrectnessTest only
 
